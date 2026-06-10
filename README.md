@@ -64,7 +64,20 @@ cd multiagent-particle-envs && pip install -e .
 | `HalfCheetah-v2` | Multi-agent MuJoCo (via `multiagent_mujoco`) |
 | OGBench / D4RL | Single-agent benchmarks (inherited from FQL) |
 
-Offline datasets should be placed under `~/mydata/datasets/{env_name}/{data_type}/seed_{seed}_data/`. Supported `data_type` values include `expert`, `medium`, `random`, `medium-expert`, and `random-medium`.
+## Dataset
+
+Offline MARL datasets are available on Hugging Face:
+
+**[zhuoran-li/offline_marl_dataset](https://huggingface.co/datasets/zhuoran-li/offline_marl_dataset/)**
+
+Download the dataset and organize it under `~/mydata/datasets/{env_name}/{data_type}/seed_{seed}_data/` before training. Supported `data_type` values include `expert`, `medium`, `random`, `medium-expert`, and `random-medium`.
+
+Example using the Hugging Face CLI:
+
+```bash
+pip install huggingface_hub
+huggingface-cli download zhuoran-li/offline_marl_dataset --repo-type dataset --local-dir ~/mydata/datasets
+```
 
 ## Usage
 
