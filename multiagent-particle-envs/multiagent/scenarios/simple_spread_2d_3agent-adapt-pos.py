@@ -1,0 +1,262 @@
+import numpy as np
+from multiagent.core import World, Agent, Landmark
+from multiagent.scenario import BaseScenario
+import itertools
+import random
+
+class Scenario(BaseScenario):
+    def make_world(self, num_agents=3, unavailable_target=[]):
+        world = World()
+        # set any world properties first
+        world.name = "simple_spread_test"
+        world.dim_c = 2
+        world.dim_p = 2
+        num_agents = num_agents
+        num_landmarks = 2 * num_agents
+        #print ('\033[1;32m[simple_spread] num_agents: {}, num_landmarks: {}\033[1;0m'.format(num_agents, num_landmarks))
+        # add agents
+        world.agents = [Agent() for i in range(num_agents)]
+        for i, agent in enumerate(world.agents):
+            agent.name = 'agent %d' % i
+            agent.collide = True
+            agent.silent = True
+            agent.size = 0.1 #1e-10 #0.1
+        # add landmarks
+        world.landmarks = [Landmark() for i in range(num_landmarks)]
+        for i, landmark in enumerate(world.landmarks):
+            landmark.name = 'landmark %d' % i
+            landmark.collide = False
+            landmark.movable = False
+        # make initial conditions
+        world.unavailable_target = unavailable_target
+        self.reset_world(world)
+        return world
+
+    def reset_world(self, world):
+        # random properties for agents
+        for i, agent in enumerate(world.agents):
+            agent.color = np.array([0.35, 0.35, 0.85])
+        # random properties for landmarks
+        for i, landmark in enumerate(world.landmarks):
+            landmark.color = np.array([0.25, 0.25, 0.25])
+
+        if len(world.agents) <= 3:
+            boundary = 1
+        elif len(world.agents) <= 10:
+            boundary = 2
+        else:
+            return NotImplementedError
+
+        # set random initial states
+        for agent in world.agents:
+            agent.state.p_pos = 0.2 * np.random.uniform(-boundary, boundary, world.dim_p) #0.1#0.001
+            #agent.state.p_pos = np.zeros(world.dim_c) 
+            #+ 1e-1 * np.random.uniform(-boundary, boundary, world.dim_p)
+            agent.state.p_vel = np.zeros(world.dim_c)
+            agent.state.c = np.zeros(world.dim_c)
+        #pi = 3.14159265358979
+        #pos_data = [[1.0,0.0],[0.0,1.0],[-1.0,0.0],[0.0,-1.0]]
+        x_data = np.cos(np.pi * 2 * np.arange(6) / 6)
+        y_data = np.sin(np.pi * 2 * np.arange(6) / 6)
+        #pos_data = [[0.5,0.5],[0.5,-0.5],[-0.5,-0.5],[-0.5,0.5]]
+        for i, landmark in enumerate(world.landmarks):
+            landmark.state.p_pos = np.array([x_data[i],y_data[i]])
+            if(i not in world.unavailable_target):
+                landmark.state.p_pos_cal = np.array([x_data[i],y_data[i]])
+            else:
+                landmark.state.p_pos_cal = np.array([-1e6,-1e6])
+            #landmark.state.p_pos = np.array(pos_data[i])
+            #landmark.state.p_pos = np.random.uniform(-boundary, boundary, world.dim_p)
+            #landmark.state.p_pos = np.ones(world.dim_p) * ((-1.)**i)
+            landmark.state.p_vel = np.zeros(world.dim_p)
+
+    # def reset_world(self, world):
+    #     # random properties for agents
+    #     for i, agent in enumerate(world.agents):
+    #         agent.color = np.array([0.35, 0.35, 0.85])
+    #     # random properties for landmarks
+    #     for i, landmark in enumerate(world.landmarks):
+    #         landmark.color = np.array([0.25, 0.25, 0.25])
+    #     # set random initial states
+    #     for agent in world.agents:
+    #         agent.state.p_pos = np.random.uniform(-1, +1, world.dim_p)
+    #         agent.state.p_vel = np.zeros(world.dim_p)
+    #         agent.state.c = np.zeros(world.dim_c)
+    #     for i, landmark in enumerate(world.landmarks):
+    #         landmark.state.p_pos = np.random.uniform(-1, +1, world.dim_p)
+    #         landmark.state.p_vel = np.zeros(world.dim_p)
+
+    def benchmark_data(self, agent, world):
+        rew = 0
+        collisions = 0
+        occupied_landmarks = 0
+        min_dists = 0
+        num_agents_on_landmarks = [] # modified by ling
+
+        for l in world.landmarks:
+            dists = [np.sqrt(np.sum(np.square(a.state.p_pos - l.state.p_pos))) for a in world.agents]
+            min_dists += min(dists)
+            rew -= min(dists)
+            if min(dists) < 0.1:
+                occupied_landmarks += 1
+            
+            # modified by ling
+            num_agents_on_l = 0
+            for dist in dists:
+                if dist < 0.1:
+                    num_agents_on_l += 1
+            num_agents_on_landmarks.append(num_agents_on_l)
+        '''
+        if agent.collide:
+            for a in world.agents:
+                if self.is_collision(a, agent) and a.name != agent.name: # modified by ling
+                    rew -= 1
+                    collisions += 1
+        '''
+        
+
+        return (rew, collisions, min_dists, occupied_landmarks, num_agents_on_landmarks)
+
+
+    def is_collision(self, agent1, agent2):
+        delta_pos = agent1.state.p_pos - agent2.state.p_pos
+        dist = np.sqrt(np.sum(np.square(delta_pos)))
+        dist_min = agent1.size + agent2.size
+        return True if dist < dist_min else False
+
+    def reward(self, agent, world):
+        # Agents are rewarded based on minimum agent distance to each landmark, penalized for collisions
+        rew = 0
+        #min_dists = []
+        min_index = []
+        min_dist = []
+        for a in world.agents:
+            dists = [np.sqrt(np.sum(np.square(a.state.p_pos - l.state.p_pos_cal))) for l in world.landmarks]
+            #print(dists)
+            '''
+            for l in world.landmarks:
+                print("a pos",a.state.p_pos)
+                print("l pos",l.state.p_pos)
+                print("dist",np.sqrt(np.sum(np.square(a.state.p_pos - l.state.p_pos))))
+            '''
+            #rew -= min(dists)
+            rew += min(1. / min(dists), 10.)
+            min_index.append(np.argmin(dists))
+            min_dist.append(min(dists))
+        #[3,1],[0,1],[0,2],[0,2],[2,0]
+        #[3,2],[1,3],[3,1],[0,2],[0,1]
+        
+        #TODO: a environmental barrier
+        """ 
+        min_dist = np.array(min_dist)
+        barrier_list = list(itertools.permutations(np.arange(4),2))
+        random.shuffle(barrier_list)
+
+        select_num = 8
+        random_barrier = np.array(barrier_list[:select_num])
+        temp = (min_index == random_barrier)
+        all_bool = np.array([temp[i].all() for i in range(select_num)]).any() """
+
+        #all_bool = temp[0].all() and temp[1].all() and temp[2].all() and temp[3].all()
+        
+        #random_barrier = np.random.choice(4, size=2, replace=False)
+
+        #if((min_index == random_barrier).all() and min(dists) <= 0.1):
+
+        #random
+        #if(all_bool and np.min(min_dist) <= 0.5):
+        #[3,1],[0,1],[0,2],[0,2],[2,0]
+        #[3,2],[1,3],[3,1],[0,2],[0,1]
+        #adversarial
+        """ if((min_index == [2,0] or all_bool is True) and np.min(min_dist) <= 0.1):
+            rew = 0 """
+
+        
+        #min_dists.append(min(dists))
+        #min_dists = np.array(min_dists)
+        #min_dist = min(min_dists)
+        #import pdb
+        #pdb.set_trace()
+        #rew += min(1. / min_dist, 100.) # modified by ling
+        #print("reward is",rew)
+        # print ('landmark [{}]: {}'.format(l.name, 1. / min(dists), 10))
+        if agent.collide:
+            for a in world.agents:
+                if self.is_collision(a, agent) and a.name != agent.name: # modified by ling
+                    rew -= 15 # modified by ling 
+                    #print('collide')
+
+        
+        return rew
+
+    # def reward(self, agent, world):
+    #     # Agents are rewarded based on minimum agent distance to each landmark, penalized for collisions
+    #     rew = 0
+    #     for l in world.landmarks:
+    #         dists = [np.sqrt(np.sum(np.square(a.state.p_pos - l.state.p_pos))) for a in world.agents]
+    #         if min(dists) < 0.1:
+    #             rew += 10
+    #         else:
+    #             # rew -= 0.1 * min(dists)
+    #             rew -= 0.01 * min(dists)
+    #             # rew -= min(dists)
+    #         # rew += min(1. / min(dists), 10.) # modified by ling
+    #         # print ('landmark [{}]: {}'.format(l.name, 1. / min(dists), 10))
+    #     if agent.collide:
+    #         for a in world.agents:
+    #             if self.is_collision(a, agent) and a.name != agent.name: # modified by ling
+    #                 rew -= 1
+    #     return rew
+
+    def observation(self, agent, world):
+        # get positions of all entities in this agent's reference frame
+        entity_pos = []
+        for entity in world.landmarks:  # world.entities:
+            entity_pos.append(entity.state.p_pos - agent.state.p_pos)
+        
+        # entity colors
+        entity_color = []
+        for entity in world.landmarks:  # world.entities:
+            entity_color.append(
+                entity.color
+            )
+        
+        # communication of all other agents
+        comm = []
+        other_pos = []
+        for other in world.agents:
+            if other is agent: continue
+            comm.append(other.state.c)
+            other_pos.append(other.state.p_pos - agent.state.p_pos)
+
+        # print ('p_vel: {}, p_pos: {}, entity_pos: {}, other_pos: {}, comm: {}'.format(agent.state.p_vel, agent.state.p_pos, entity_pos, other_pos, comm))
+        # p_vel: [1.54798273 1.80932997]
+        # p_pos: [1.64310331 2.93676854]
+        # entity_pos: [array([-1.69713533, -2.61021445]), array([-1.0316461 , -3.43080753]), array([-2.48395644, -2.47124733])]
+        # other_pos: [array([-0.5826037 , -2.28894684]), array([-1.20824731, -1.75810608])]
+        # comm: [array([0., 0.]), array([0., 0.])]
+
+
+        return np.concatenate([agent.state.p_vel] + [agent.state.p_pos] + entity_pos + other_pos + comm)
+
+    def dones_func(self, agent, world):
+        dists = []
+        for l in world.landmarks:
+            dist = np.sqrt(np.sum(np.square(agent.state.p_pos - l.state.p_pos)))
+            dists.append(dist)
+        dists = np.array(dists)
+        #print("dists is:",dists)
+        #dists = np.array[np.sqrt(np.sum(np.square(a.state.p_pos - l.state.p_pos))) for l in world.landmarks]
+        if(np.min(dists) <= 0.1):
+            dones = True
+        else:
+            dones = False
+        return dones
+        #return False
+        '''
+        for l in world.landmarks:
+            print("a pos",a.state.p_pos)
+            print("l pos",l.state.p_pos)
+            print("dist",np.sqrt(np.sum(np.square(a.state.p_pos - l.state.p_pos))))
+        '''
+        # rew -= min(dists)
